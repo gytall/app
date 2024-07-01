@@ -1,0 +1,31 @@
+services:
+  app:
+    container_name: my_project_app
+    build: ./
+    env_file:
+      - .env
+    command: ["bash", "/docker/app.sh"]
+    depends_on:
+      - project_db
+
+  project_db:
+    container_name: project_db
+    image: postgres
+    environment:
+      - POSTGRES_DB=database
+      - POSTGRES_USER=Ilya
+      - POSTGRES_PASSWORD=12345
+    ports:
+      - 5432:5432
+    env_file:
+      - .env
+    volumes:
+      - project_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  project_db_data:
