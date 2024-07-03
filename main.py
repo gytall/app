@@ -1,10 +1,11 @@
 import requests
 import json
 import chardet
-from bs4 import BeautifulSoup
 from flask import Flask, request, render_template, jsonify
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 # Базовый URL для API hh.ru
 BASE_URL = "https://api.hh.ru/vacancies"
@@ -23,16 +24,14 @@ def get_area_id(area_name):
                         return city['id']
     return None
 
-def get_vacancies(url, params, total_vacancies=50):
+def get_vacancies(url, params, total_vacancies=20):
     all_vacancies = []
     current_page = 0
     while len(all_vacancies) < total_vacancies:
         params['page'] = current_page
         response = requests.get(url, params=params)
         if response.status_code == 200:
-            result = chardet.detect(response.content)
-            encoding = result['encoding']
-            data = response.content.decode(encoding)
+            data = decode_response(response.content)
             vacancies = parse_vacancies(data)
             all_vacancies.extend(vacancies)
             if len(vacancies) < params['per_page']:  # Если вернулось меньше вакансий, значит, это последняя страница
@@ -42,6 +41,14 @@ def get_vacancies(url, params, total_vacancies=50):
             print("Error:", response.status_code)
             break
     return all_vacancies[:total_vacancies]
+
+def decode_response(content):
+    try:
+        return content.decode('utf-8')
+    except UnicodeDecodeError:
+        result = chardet.detect(content)
+        encoding = result['encoding']
+        return content.decode(encoding)
 
 def parse_vacancies(data):
     vacancies = []
@@ -68,9 +75,7 @@ def parse_vacancies(data):
 def get_key_skills(vacancy_id):
     response = requests.get(f"{BASE_URL}/{vacancy_id}")
     if response.status_code == 200:
-        result = chardet.detect(response.content)
-        encoding = result['encoding']
-        data = response.content.decode(encoding)
+        data = decode_response(response.content)
         json_data = json.loads(data)
         key_skills = [skill['name'] for skill in json_data.get('key_skills', [])]
         return ', '.join(key_skills)
@@ -89,27 +94,12 @@ def get_salary(salary):
 
 @app.route('/', methods=['GET'])
 def index():
-    return render_template('index.html')
+    return ...
 
-@app.route('/search', methods=['POST'])
-def search():
-    text = request.form.get('text', 'Python')
-    area = request.form.get('area', 'Москва')
-    per_page = request.form.get('per_page', 20)
-    total = request.form.get('total', 50)
-
-    area_id = get_area_id(area)
-    if not area_id:
-        return jsonify({'error': 'Area not found'})
-
-    params = {
-        'text': text,
-        'area': area_id,
-        'per_page': int(per_page),
-        'page': 0
-    }
-
-    vacancies = get_vacancies(BASE_URL, params, int(total))
+@app.route('/vacancies', methods=['GET'])
+def get_all_vacancies():
+    total_vacancies = request.args.get('total', default=20, type=int)
+    vacancies = get_vacancies(BASE_URL, {'per_page': total_vacancies})
     return jsonify(vacancies)
 
 if __name__ == "__main__":
