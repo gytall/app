@@ -1,8 +1,9 @@
 import requests
 import json
 import chardet
-from flask import Flask, request, render_template, jsonify
+from flask import Flask, request, jsonify
 from flask_cors import CORS
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
 CORS(app)
@@ -10,6 +11,7 @@ CORS(app)
 # Базовый URL для API hh.ru
 BASE_URL = "https://api.hh.ru/vacancies"
 AREAS_URL = "https://api.hh.ru/areas"
+MAX_WORKERS = 10  # Количество параллельных потоков
 
 def get_area_id(area_name):
     response = requests.get(AREAS_URL)
@@ -27,19 +29,25 @@ def get_area_id(area_name):
 def get_vacancies(url, params, total_vacancies=20):
     all_vacancies = []
     current_page = 0
-    while len(all_vacancies) < total_vacancies:
-        params['page'] = current_page
+
+    def fetch_page(page):
+        params['page'] = page
         response = requests.get(url, params=params)
         if response.status_code == 200:
             data = decode_response(response.content)
             vacancies = parse_vacancies(data)
-            all_vacancies.extend(vacancies)
-            if len(vacancies) < params['per_page']:  # Если вернулось меньше вакансий, значит, это последняя страница
-                break
-            current_page += 1
+            return vacancies
         else:
-            print("Error:", response.status_code)
-            break
+            return []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_page = {executor.submit(fetch_page, page): page for page in range(total_vacancies)}
+        for future in as_completed(future_to_page):
+            page_vacancies = future.result()
+            all_vacancies.extend(page_vacancies)
+            if len(all_vacancies) >= total_vacancies:
+                break
+
     return all_vacancies[:total_vacancies]
 
 def decode_response(content):
@@ -94,12 +102,12 @@ def get_salary(salary):
 
 @app.route('/', methods=['GET'])
 def index():
-    return ...
+    return 'Hello'
 
 @app.route('/vacancies', methods=['GET'])
 def get_all_vacancies():
-    total_vacancies = request.args.get('total', default=20, type=int)
-    vacancies = get_vacancies(BASE_URL, {'per_page': total_vacancies})
+    total_vacancies = request.args.get('total', default=50, type=int)
+    vacancies = get_vacancies(BASE_URL, {'per_page': total_vacancies}, total_vacancies)
     return jsonify(vacancies)
 
 if __name__ == "__main__":
