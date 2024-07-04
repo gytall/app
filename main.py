@@ -8,10 +8,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 app = Flask(__name__)
 CORS(app)
 
-# Базовый URL для API hh.ru
+
 BASE_URL = "https://api.hh.ru/vacancies"
 AREAS_URL = "https://api.hh.ru/areas"
-MAX_WORKERS = 10  # Количество параллельных потоков
+MAX_WORKERS = 10
 
 def get_area_id(area_name):
     response = requests.get(AREAS_URL)
@@ -62,11 +62,13 @@ def parse_vacancies(data):
     vacancies = []
     json_data = json.loads(data)
     for item in json_data['items']:
+        salary = get_salary(item['salary'])
+        if not salary:
+            continue
         vacancy_id = item['id']
         key_skills = get_key_skills(vacancy_id)
         if not key_skills:
             key_skills = item['snippet']['requirement'] if item['snippet']['requirement'] else 'No key skills or requirements provided'
-        salary = get_salary(item['salary'])
         experience = item['experience']['name'] if item['experience'] else 'Опыт работы не важен'
         vacancy = {
             'name': item['name'],
@@ -90,7 +92,7 @@ def get_key_skills(vacancy_id):
     return ""
 
 def get_salary(salary):
-    if not salary:
+    if not salary or salary.get('currency') != 'RUR':
         return ""
     if salary['from'] and salary['to']:
         return f"{salary['from']} - {salary['to']} {salary['currency']}"
