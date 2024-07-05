@@ -1,6 +1,7 @@
 import requests
 import json
 import chardet
+import psycopg2
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -8,10 +9,85 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 app = Flask(__name__)
 CORS(app)
 
-
 BASE_URL = "https://api.hh.ru/vacancies"
 AREAS_URL = "https://api.hh.ru/areas"
 MAX_WORKERS = 10
+
+DB_HOST = 'localhost'
+DB_PORT = 5433
+DB_NAME = 'database'
+DB_USER = 'user'
+DB_PASS = '12345'
+
+def get_db_connection():
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASS
+    )
+    create_table_query = '''
+    CREATE TABLE IF NOT EXISTS vacancies (
+        id VARCHAR(255) PRIMARY KEY,
+        name TEXT,
+        key_skills TEXT,
+        experience TEXT,
+        salary TEXT,
+        location TEXT,
+        company TEXT,
+        url TEXT
+    )
+    '''
+    cursor = conn.cursor()
+    cursor.execute(create_table_query)
+    conn.commit()
+    cursor.close()
+    return conn
+
+def save_vacancies(vacancies):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    for vacancy in vacancies:
+        cursor.execute('''
+            INSERT INTO vacancies (id, name, key_skills, experience, salary, location, company, url)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            key_skills = EXCLUDED.key_skills,
+            experience = EXCLUDED.experience,
+            salary = EXCLUDED.salary,
+            location = EXCLUDED.location,
+            company = EXCLUDED.company,
+            url = EXCLUDED.url
+        ''', (vacancy['id'], vacancy['name'], vacancy['key_skills'], vacancy['experience'], vacancy['salary'], vacancy['location'], vacancy['company'], vacancy['url']))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def get_vacancies_from_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, name, key_skills, experience, salary, location, company, url FROM vacancies')
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    vacancies = []
+    for row in rows:
+        vacancy = {
+            'id': row[0],
+            'name': row[1],
+            'key_skills': row[2],
+            'experience': row[3],
+            'salary': row[4],
+            'location': row[5],
+            'company': row[6],
+            'url': row[7]
+        }
+        vacancies.append(vacancy)
+    
+    return vacancies
 
 def get_area_id(area_name):
     response = requests.get(AREAS_URL)
@@ -71,6 +147,7 @@ def parse_vacancies(data):
             key_skills = item['snippet']['requirement'] if item['snippet']['requirement'] else 'No key skills or requirements provided'
         experience = item['experience']['name'] if item['experience'] else 'Опыт работы не важен'
         vacancy = {
+            'id': item['id'],
             'name': item['name'],
             'key_skills': key_skills,
             'experience': experience,
@@ -108,9 +185,28 @@ def index():
 
 @app.route('/vacancies', methods=['GET'])
 def get_all_vacancies():
-    total_vacancies = request.args.get('total', default=50, type=int)
-    vacancies = get_vacancies(BASE_URL, {'per_page': total_vacancies}, total_vacancies)
+    # Сначала получаем данные из базы данных
+    vacancies = get_vacancies_from_db()
+    
+    # Если в базе данных нет данных, то получаем данные из API и сохраняем их в базу данных
+    if not vacancies:
+        total_vacancies = request.args.get('total', default=50, type=int)
+        vacancies = get_vacancies(BASE_URL, {'per_page': total_vacancies}, total_vacancies)
+        save_vacancies(vacancies)
+    
+    return jsonify(vacancies)
+
+@app.route('/vacancies_from_api', methods=['GET'])
+def get_vacancies_from_api():
+    page = request.args.get('page', default=0, type=int)
+    per_page = request.args.get('per_page', default=20, type=int)
+    params = {'page': page, 'per_page': per_page}
+    vacancies = get_vacancies(BASE_URL, params, per_page)
     return jsonify(vacancies)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    conn = get_db_connection()
+    if conn:
+        print('Successfully connected to the database')
+        conn.close()
+    app.run(host='0.0.0.0', port=5000, debug=True)

@@ -22,6 +22,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8081:8080
 
 volumes:
   project_db_data:
