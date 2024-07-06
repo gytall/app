@@ -1,13 +1,13 @@
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import requests
 import json
 import chardet
 import psycopg2
-from flask import Flask, request, jsonify
-from flask_cors import CORS
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Разрешает CORS для всех маршрутов
 
 BASE_URL = "https://api.hh.ru/vacancies"
 AREAS_URL = "https://api.hh.ru/areas"
@@ -104,7 +104,7 @@ def get_area_id(area_name):
 
 def get_vacancies(url, params, total_vacancies=20):
     all_vacancies = []
-    current_page = 0
+    current_page = params.get('page', 0)
 
     def fetch_page(page):
         params['page'] = page
@@ -117,14 +117,14 @@ def get_vacancies(url, params, total_vacancies=20):
             return []
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_page = {executor.submit(fetch_page, page): page for page in range(total_vacancies)}
+        future_to_page = {executor.submit(fetch_page, page): page for page in range(current_page, current_page + MAX_WORKERS)}
         for future in as_completed(future_to_page):
             page_vacancies = future.result()
             all_vacancies.extend(page_vacancies)
             if len(all_vacancies) >= total_vacancies:
                 break
 
-    return all_vacancies[:total_vacancies]
+    return list(all_vacancies)[:total_vacancies]
 
 def decode_response(content):
     try:
